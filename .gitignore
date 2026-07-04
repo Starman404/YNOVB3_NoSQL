@@ -1,0 +1,24 @@
+# Environnement
+.env
+
+# Dépendances
+node_modules/
+
+# Build
+dist/
+build/
+
+# Logs
+*.log
+npm-debug.log*
+
+# OS
+.DS_Store
+Thumbs.db
+
+# IDE
+.vscode/
+.idea/
+
+# Neo4j (si volumes montés en local hors Docker)
+data/neo4j/
