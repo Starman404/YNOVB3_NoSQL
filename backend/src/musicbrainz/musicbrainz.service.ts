@@ -76,7 +76,7 @@ export class MusicbrainzService {
 
   // Récupère les morceaux d'un artiste (limit = combien, offset = à partir de quel numéro)
   async getArtistRecordings(mbid: string, limit = 100, offset = 0) {
-    return this.request('/recording', { artist: mbid, limit, offset, fmt: 'json' });
+    return this.request('/recording', { artist: mbid, limit, offset, fmt: 'json', inc: 'artist-credits'});
   }
 
   // Récupère les albums d'un artiste (avec les infos des labels)
