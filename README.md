@@ -1,136 +1,156 @@
 # MusicGraph
 
-Exploration des collaborations musicales avec MusicBrainz et Neo4j.
+Exploration des collaborations musicales avec l'API **MusicBrainz** et une base de données graphe **Neo4j**.
 
-> Ce README couvre le lancement du projet. La documentation du modèle de
-> données, des choix techniques et de l'analyse data se trouve dans `docs/`.
+MusicGraph permet de rechercher des artistes, d'importer leurs morceaux et albums, de détecter leurs collaborations/featurings, puis de visualiser tout ça sous forme de graphe et de statistiques.
+
+> Le sujet complet du projet (cahier des charges, barème) est disponible dans [`docs/sujet.md`](./docs/sujet.md).
+> L'analyse des données produites et les limites du modèle sont détaillées dans [`docs/analyse.md`](./docs/analyse.md).
+> Le modèle de données Neo4j est détaillé dans [`docs/data-model.md`](./docs/data-model.md).
+
+---
+
+## Stack technique
+
+| Composant | Techno |
+|---|---|
+| Backend / API | NestJS (Node.js, TypeScript) |
+| Base de données | Neo4j (Aura cloud ou instance locale) |
+| Source de données | API publique MusicBrainz |
+| Frontend | React 19 + Vite + TypeScript |
+| Visualisation graphe | react-force-graph-2d |
+| Conteneurisation | Docker / Docker Compose |
+
+## Architecture
+
+```
+musicgraph/
+├── backend/     # API NestJS (recherche, import, lecture Neo4j, stats, graphe)
+├── frontend/    # Application React (recherche, fiches artistes, graphe, stats)
+├── data/        # Jeu de données d'exemple + script de seed automatique
+├── docs/        # Documentation (sujet, modèle de données, analyse)
+├── docker-compose.yml
+└── .env.example
+```
+
+Le frontend consomme uniquement l'API du backend (`/api/...`), qui lui-même interroge :
+- **MusicBrainz** pour la recherche et la récupération de données musicales (avec respect du rate limit d'1 requête/seconde et d'un `User-Agent` dédié),
+- **Neo4j** pour la persistance des artistes, morceaux, albums, genres, labels et collaborations sous forme de graphe.
 
 ## Prérequis
 
-* **Docker** et **Docker Compose** installés et démarrés
+- Node.js 20+ (si lancement hors Docker)
+- Docker et Docker Compose
+- Aucune instance externe requise : le `docker-compose.yml` embarque un service **Neo4j** local (tout-en-Docker). Une base [Neo4j Aura](https://neo4j.com/cloud/aura/) cloud reste possible en alternative (voir section ci-dessous).
 
-  * Vérifier : `docker --version` et `docker compose version`
-  * Sur Windows/Mac : Docker Desktop doit être lancé (icône baleine active)
-  * Sur Linux : le service `docker` doit tourner (`sudo systemctl status docker`)
-* Rien d'autre à installer : Node.js, les librairies (`express`, `react`,
-`neo4j-driver`, etc.) sont installés automatiquement **dans les conteneurs**
-au moment du build, pas besoin de `npm install` sur ta machine.
+## Installation & lancement
 
-## 1\. Configuration
-
-À la racine du projet :
+### 1. Configuration
 
 ```bash
 cp .env.example .env
 ```
 
-Puis ouvrir `.env` et modifier au minimum :
+Renseignez dans `.env` :
+- `NEO4J_URI`, `NEO4J_USERNAME`, `NEO4J_PASSWORD`, `NEO4J_DATABASE` : accès à votre instance Neo4j (valeurs par défaut déjà prêtes pour le service Docker local, voir ci-dessous).
+- `MUSICBRAINZ_USER_AGENT` : un User-Agent identifiable (ex: `MusicGraph/1.0.0 (votre.email@example.com)`), requis par MusicBrainz.
 
-```env
-MUSICBRAINZ\_USER\_AGENT=MusicGraph/1.0.0 (ton-email@example.com)
-NEO4J\_PASSWORD=un\_mot\_de\_passe\_de\_ton\_choix
-```
-
-`MUSICBRAINZ\_USER\_AGENT` doit contenir un vrai contact : c'est obligatoire
-pour que l'API MusicBrainz accepte les requêtes sans les limiter fortement.
-
-## 2\. Lancer le projet
-
-**Premier lancement** (construit les images, obligatoire la première fois
-et à chaque fois qu'un `package.json` change) :
+### 2. Lancement avec Docker Compose (recommandé)
 
 ```bash
-docker compose up --build
+docker-compose up --build
 ```
 
-**Lancements suivants** :
+Le `docker-compose.yml` démarre **trois services** : `neo4j` (base graphe locale), `backend` (API) et `frontend` (site web). Tout est conteneurisé, aucune dépendance externe n'est nécessaire.
+
+- Backend disponible sur `http://localhost:3000/api`
+- Frontend disponible sur `http://localhost:5173`
+- Neo4j Browser disponible sur `http://localhost:7474` (identifiants : `neo4j` / valeur de `NEO4J_LOCAL_PASSWORD`, `musicgraph123` par défaut)
+
+Le service `backend` attend que `neo4j` soit prêt (healthcheck) avant de démarrer, et le driver Neo4j du backend se reconnecte simplement via `NEO4J_URI=bolt://neo4j:7687` (nom du service Docker), sans configuration supplémentaire.
+
+> **Alternative Neo4j Aura (cloud)** : si vous préférez ne pas faire tourner Neo4j en local (ex: déploiement sans stockage persistant), remplacez dans `.env` les valeurs `NEO4J_URI`/`NEO4J_USERNAME`/`NEO4J_PASSWORD`/`NEO4J_DATABASE` par celles de votre instance [Neo4j Aura](https://neo4j.com/cloud/aura/) (voir les lignes commentées dans `.env.example`), puis retirez ou ignorez le service `neo4j` du `docker-compose.yml`.
+
+### 3. Lancement en local sans Docker
 
 ```bash
-docker compose up
+# Backend
+cd backend
+npm install
+npm run dev        # http://localhost:3000/api
+
+# Frontend (dans un autre terminal)
+cd frontend
+npm install
+npm run dev         # http://localhost:5173
 ```
 
-Laisser le terminal ouvert : les logs des 3 services (Neo4j, backend,
-frontend) s'affichent en direct. `Ctrl+C` pour arrêter proprement.
+### 4. Peupler la base (optionnel)
 
-Pour lancer en arrière-plan (sans bloquer le terminal) :
+Un script importe automatiquement une liste d'artistes (rap FR/US + quelques têtes d'affiche internationales) via l'API du backend :
 
 ```bash
-docker compose up -d
-# puis pour voir les logs si besoin :
-docker compose logs -f
+cd data
+npx ts-node seed.ts   # le backend doit tourner sur http://localhost:3000
 ```
 
-## 3\. Vérifier que tout fonctionne
+Le fichier `data/french-rappers.json` liste également, à titre d'exemple/référence, des artistes et leurs MBID MusicBrainz.
 
-Une fois démarré (le premier lancement peut prendre 1-2 minutes, le temps
-que Neo4j s'initialise), ouvrir dans le navigateur :
+## Utilisation
 
-|Service|URL|Résultat attendu|
-|-|-|-|
-|Frontend|http://localhost:5173|Page d'accueil MusicGraph|
-|Backend (API)|http://localhost:4000/health|`{"status":"ok","service":"musicgraph-backend"}`|
-|Neo4j Browser|http://localhost:7474|Interface de connexion Neo4j (login = `NEO4J\_USER`/`NEO4J\_PASSWORD` du `.env`)|
+1. **Rechercher** un artiste par nom (page *Recherche*) → résultats MusicBrainz avec nom, MBID, pays, type, score de correspondance.
+2. **Importer** un artiste depuis un résultat de recherche → création/mise à jour du nœud `Artist` dans Neo4j (déduplication par MBID), import de ses morceaux, albums et détection des collaborations.
+3. **Explorer** : liste des artistes importés, fiche détail (morceaux, albums, collaborations), graphe interactif, statistiques (top artistes, top collaborations, top genres).
 
-Si les 3 répondent, l'environnement est opérationnel.
+## API
 
-## 4\. Arrêter le projet
-
-```bash
-# Arrêter les conteneurs (garde les données Neo4j)
-docker compose down
-
-# Arrêter ET supprimer les données Neo4j (repart de zéro)
-docker compose down -v
-```
-
-## Commandes utiles
-
-```bash
-# Voir les conteneurs en cours d'exécution
-docker compose ps
-
-# Voir les logs d'un seul service
-docker compose logs -f backend
-docker compose logs -f frontend
-docker compose logs -f neo4j
-
-# Redémarrer un seul service après une modif de config
-docker compose restart backend
-
-# Reconstruire un seul service (après ajout d'une dépendance dans package.json)
-docker compose up --build backend
-
-# Ouvrir un terminal dans un conteneur (debug)
-docker compose exec backend sh
-```
-
-## Problèmes fréquents
-
-* **`Cannot connect to the Docker daemon`** → Docker Desktop n'est pas lancé.
-* **Le backend redémarre en boucle / erreur de connexion Neo4j** → Neo4j n'a
-pas fini de démarrer. `docker compose up` attend normalement que Neo4j soit
-prêt (healthcheck) avant de lancer le backend ; si l'erreur persiste,
-regarder `docker compose logs neo4j`.
-* **Port déjà utilisé (`port is already allocated`)** → un autre programme
-utilise déjà le port 5173, 4000 ou 7474/7687. Soit fermer ce programme,
-soit changer le port dans `.env` (`BACKEND\_PORT`, `FRONTEND\_PORT`).
-* **Modification du code non prise en compte** → les dossiers `backend/` et
-`frontend/` sont montés en volume (voir `docker-compose.yml`), donc le code
-se recharge normalement à chaud. Si ça bloque, `docker compose restart backend`
-(ou `frontend`).
-
-## Structure du projet
+Toutes les routes sont préfixées par `/api`. Résumé :
 
 ```
-musicgraph/
-├── backend/     API Express + intégration MusicBrainz + Neo4j
-├── frontend/    Interface web React
-├── data/        Jeux de données / exports
-├── docs/        Documentation (modèle de données, choix techniques, analyse)
-└── docker-compose.yml
+GET  /api/search/artists?q=...
+POST /api/import/artists            { mbid }
+GET  /api/artists
+GET  /api/artists/:id
+GET  /api/artists/:id/recordings
+GET  /api/artists/:id/releases
+GET  /api/artists/:id/collaborations
+
+GET  /api/recordings
+GET  /api/recordings/:id
+GET  /api/recordings/:id/artists
+GET  /api/recordings/:id/releases
+
+GET  /api/releases
+GET  /api/releases/:id
+GET  /api/releases/:id/recordings
+GET  /api/releases/:id/artists
+
+GET  /api/graph
+GET  /api/graph/artists/:id
+GET  /api/graph/collaborations
+GET  /api/graph/path?from=MBID_A&to=MBID_B   # plus court chemin entre 2 artistes
+
+GET  /api/stats/overview
+GET  /api/stats/top-artists
+GET  /api/stats/top-collaborations
+GET  /api/stats/top-genres
 ```
 
-## Répartition du travail
+## Modèle de données
 
-Voir `TASKS.md`.
+Voir [`docs/data-model.md`](./docs/data-model.md) pour le détail des nœuds (`Artist`, `Recording`, `Release`, `Label`, `Genre`, `Area`) et des relations (`PERFORMED`, `FEATURED_ON`, `COLLABORATED_WITH`, `APPEARS_ON`, `RELEASED_BY`, `ASSOCIATED_WITH_GENRE`, `FROM_AREA`, `RELEASED_IN`).
 
+## Qualité des données
+
+- Déduplication systématique via le MBID MusicBrainz (`MERGE` Cypher).
+- Rate limiting respecté sur les appels MusicBrainz (1 requête/seconde).
+- Gestion des erreurs API (voir `docs/analyse.md` pour le détail des cas gérés et des limites connues).
+- Détection des collaborations sur deux axes : artistes multiples crédités sur un enregistrement MusicBrainz, et mots-clés (`feat.`, `ft.`, `featuring`, `avec`, `x`, `&`) dans les titres.
+
+## Limites connues
+
+Voir [`docs/analyse.md`](./docs/analyse.md) — notamment : couverture partielle du catalogue par artiste (import limité à 50 morceaux/albums), association morceau ↔ album par correspondance de titre (approximative), absence de recherche de plus court chemin entre deux artistes.
+
+## Licence
+
+Projet réalisé dans un cadre pédagogique (B3 Dev & B3 Data).
